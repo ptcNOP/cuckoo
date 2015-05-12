@@ -533,15 +533,15 @@ class MAEC41Report(Report):
         """
         for associated_object in associated_objects_list:
             if associated_object["properties"]["xsi:type"] is "WindowsRegistryKeyObjectType":
-                if "hive" in associated_object["properties"] and "HKEY_" not in associated_object["properties"]["hive"]:
-                    associated_object = self.processRegKeyHandle(associated_object["properties"]["hive"], associated_object)
+                if "hive" in associated_object["properties"] and "HKEY_" not in associated_object["properties"]["hive"] and "RegistryKey" in self.handleMap:
+                    self.processRegKeyHandle(associated_object["properties"]["hive"], associated_object)
 
-    def processRegKeyHandle(self, handle_id, current_dict):
+    def processRegKeyHandle(self, handle_id, current_dict, current_recursion=0):
         """Process a Registry Key Handle and return the full key, recursing as necessary.
         @param handle_id: the id of the root-level handle
         @param current_dict: the dictionary containing the properties of the current key
         """
-        if "RegistryKey" in self.handleMap and handle_id in self.handleMap["RegistryKey"]:
+        if handle_id in self.handleMap["RegistryKey"]:
             handle_mapped_key = self.handleMap["RegistryKey"][handle_id]
             if "key" in handle_mapped_key["properties"]:
                 if "key" not in current_dict["properties"]:
@@ -551,12 +551,10 @@ class MAEC41Report(Report):
                 # If we find the "HKEY_" then we assume we're done.
                 if "HKEY_" in handle_mapped_key["properties"]["hive"]:
                     current_dict["properties"]["hive"] = handle_mapped_key["properties"]["hive"]
-                    return current_dict
                 # If not, then we assume the hive refers to a Handle so we recurse.
-                else:
-                    self.processRegKeyHandle(handle_mapped_key["properties"]["hive"], current_dict)
-        else:
-            return current_dict
+                elif "HKEY_" not in handle_mapped_key["properties"]["hive"] and current_recursion < 500:
+                    current_recursion += 1
+                    self.processRegKeyHandle(handle_mapped_key["properties"]["hive"], current_dict, current_recursion)
 
     def processAssociatedObject(self, parameter_mapping_dict, parameter_value, associated_object_dict = None):
         """Process a single Associated Object mapping.
