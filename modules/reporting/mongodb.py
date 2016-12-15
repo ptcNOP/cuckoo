@@ -1,4 +1,5 @@
-# Copyright (C) 2010-2015 Cuckoo Foundation.
+# Copyright (C) 2010-2013 Claudio Guarnieri.
+# Copyright (C) 2014-2016 Cuckoo Foundation.
 # This file is part of Cuckoo Sandbox - http://www.cuckoosandbox.org
 # See the file 'docs/LICENSE' for copying permission.
 
@@ -29,7 +30,7 @@ class MongoDB(Report):
         @raise CuckooReportError: if unable to connect.
         """
         host = self.options.get("host", "127.0.0.1")
-        port = self.options.get("port", 27017)
+        port = int(self.options.get("port", 27017))
         db = self.options.get("db", "cuckoo")
 
         try:
@@ -54,30 +55,31 @@ class MongoDB(Report):
 
         if existing:
             return existing["_id"]
-        else:
-            new = self.fs.new_file(filename=filename,
-                                   contentType=file_obj.get_content_type(),
-                                   sha256=file_obj.get_sha256())
-            for chunk in file_obj.get_chunks():
-                new.write(chunk)
-            try:
-                new.close()
-            except FileExists:
-                to_find = {"sha256": file_obj.get_sha256()}
-                return self.db.fs.files.find_one(to_find)["_id"]
-            else:
-                return new._id
+
+        new = self.fs.new_file(filename=filename,
+                               contentType=file_obj.get_content_type(),
+                               sha256=file_obj.get_sha256())
+
+        for chunk in file_obj.get_chunks():
+            new.write(chunk)
+
+        try:
+            new.close()
+            return new._id
+        except FileExists:
+            to_find = {"sha256": file_obj.get_sha256()}
+            return self.db.fs.files.find_one(to_find)["_id"]
 
     def run(self, results):
         """Writes report.
         @param results: analysis results dictionary.
         @raise CuckooReportError: if fails to connect or write to MongoDB.
         """
-        # We put the raise here and not at the import because it would
-        # otherwise trigger even if the module is not enabled in the config.
         if not HAVE_MONGO:
-            raise CuckooDependencyError("Unable to import pymongo "
-                                        "(install with `pip install pymongo`)")
+            raise CuckooDependencyError(
+                "Unable to import pymongo (install with "
+                "`pip install pymongo`)"
+            )
 
         self.connect()
 
@@ -104,11 +106,19 @@ class MongoDB(Report):
         # the original dictionary and possibly compromise the following
         # reporting modules.
         report = dict(results)
-        if not "network" in report:
+        if "network" not in report:
             report["network"] = {}
 
+        # This will likely hardcode the cuckoo.log to this point, but that
+        # should be fine.
+        if report.get("debug"):
+            report["debug"]["cuckoo"] = list(report["debug"]["cuckoo"])
+
+        # Store path of the analysis path.
+        report["info"]["analysis_path"] = self.analysis_path
+
         # Store the sample in GridFS.
-        if results["info"]["category"] == "file" and "target" in results:
+        if results.get("info", {}).get("category") == "file" and "target" in results:
             sample = File(self.file_path)
             if sample.valid():
                 fname = results["target"]["file"]["name"]
@@ -129,14 +139,28 @@ class MongoDB(Report):
             spcap_id = self.store_file(spcap)
             report["network"]["sorted_pcap_id"] = spcap_id
 
-        # Store the process memory dump file in GridFS and reference it back in the report.
+        mitmproxy_path = os.path.join(self.analysis_path, "dump.mitm")
+        mitmpr = File(mitmproxy_path)
+        if mitmpr.valid():
+            mitmpr_id = self.store_file(mitmpr)
+            report["network"]["mitmproxy_id"] = mitmpr_id
+
+        # Store the process memory dump file and extracted files in GridFS and
+        # reference it back in the report.
         if "procmemory" in report and self.options.get("store_memdump", False):
             for idx, procmem in enumerate(report["procmemory"]):
-                procmem_path = os.path.join(self.analysis_path, "memory", "{0}.dmp".format(procmem["pid"]))
+                procmem_path = os.path.join(
+                    self.analysis_path, "memory", "%s.dmp" % procmem["pid"]
+                )
                 procmem_file = File(procmem_path)
                 if procmem_file.valid():
                     procmem_id = self.store_file(procmem_file)
-                    report["procmemory"][idx].update({"procmem_id": procmem_id})
+                    procmem["procmem_id"] = procmem_id
+
+                for extracted in procmem.get("extracted", []):
+                    f = File(extracted["path"])
+                    if f.valid():
+                        extracted["extracted_id"] = self.store_file(f)
 
         # Walk through the dropped files, store them in GridFS and update the
         # report with the ObjectIds.
@@ -155,21 +179,21 @@ class MongoDB(Report):
 
         # Add screenshots.
         report["shots"] = []
-        shots_path = os.path.join(self.analysis_path, "shots")
-        if os.path.exists(shots_path):
+        if os.path.exists(self.shots_path):
             # Walk through the files and select the JPGs.
-            shots = [shot for shot in os.listdir(shots_path)
-                     if shot.endswith(".jpg")]
+            for shot_file in sorted(os.listdir(self.shots_path)):
+                if not shot_file.endswith(".jpg"):
+                    continue
 
-            for shot_file in sorted(shots):
-                shot_path = os.path.join(self.analysis_path,
-                                         "shots", shot_file)
+                shot_path = os.path.join(self.shots_path, shot_file)
                 shot = File(shot_path)
                 # If the screenshot path is a valid file, store it and
                 # reference it back in the report.
                 if shot.valid():
                     shot_id = self.store_file(shot)
                     report["shots"].append(shot_id)
+
+        paginate = self.options.get("paginate", 100)
 
         # Store chunks of API calls in a different collection and reference
         # those chunks back in the report. In this way we should defeat the
@@ -183,12 +207,11 @@ class MongoDB(Report):
                 chunk = []
                 chunks_ids = []
                 # Loop on each process call.
-                for index, call in enumerate(process["calls"]):
-                    # If the chunk size is 100 or if the loop is completed then
-                    # store the chunk in MongoDB.
-                    if len(chunk) == 100:
-                        to_insert = {"pid": process["process_id"],
-                                     "calls": chunk}
+                for call in process["calls"]:
+                    # If the chunk size is paginate or if the loop is
+                    # completed then store the chunk in MongoDB.
+                    if len(chunk) == paginate:
+                        to_insert = {"pid": process["pid"], "calls": chunk}
                         chunk_id = self.db.calls.insert(to_insert)
                         chunks_ids.append(chunk_id)
                         # Reset the chunk.
@@ -199,7 +222,7 @@ class MongoDB(Report):
 
                 # Store leftovers.
                 if chunk:
-                    to_insert = {"pid": process["process_id"], "calls": chunk}
+                    to_insert = {"pid": process["pid"], "calls": chunk}
                     chunk_id = self.db.calls.insert(to_insert)
                     chunks_ids.append(chunk_id)
 
@@ -211,6 +234,21 @@ class MongoDB(Report):
             report["behavior"] = dict(report["behavior"])
             report["behavior"]["processes"] = new_processes
 
+        if report.get("procmon"):
+            procmon, chunk = [], []
+
+            for entry in report["procmon"]:
+                if len(chunk) == paginate:
+                    procmon.append(self.db.procmon.insert(chunk))
+                    chunk = []
+
+                chunk.append(entry)
+
+            if chunk:
+                procmon.append(self.db.procmon.insert(chunk))
+
+            report["procmon"] = procmon
+
         # Store the report and retrieve its object id.
         self.db.analysis.save(report)
-        self.conn.disconnect()
+        self.conn.close()

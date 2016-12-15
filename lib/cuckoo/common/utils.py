@@ -1,27 +1,52 @@
-# Copyright (C) 2010-2015 Cuckoo Foundation.
+# Copyright (C) 2010-2013 Claudio Guarnieri.
+# Copyright (C) 2014-2016 Cuckoo Foundation.
 # This file is part of Cuckoo Sandbox - http://www.cuckoosandbox.org
 # See the file 'docs/LICENSE' for copying permission.
 
+import hashlib
+import logging
 import os
-import time
+import sys
 import shutil
 import ntpath
 import string
 import tempfile
 import xmlrpclib
 import inspect
+import platform
 import threading
+import json
 import multiprocessing
+import warnings
+
+from cStringIO import StringIO
 from datetime import datetime
 
 from lib.cuckoo.common.exceptions import CuckooOperationalError
 from lib.cuckoo.common.config import Config
+
+from lib.cuckoo.common.constants import CUCKOO_ROOT, CUCKOO_VERSION
+from lib.cuckoo.common.constants import GITHUB_URL, ISSUES_PAGE_URL
+
+try:
+    import bs4
+    HAVE_BS4 = True
+except ImportError:
+    HAVE_BS4 = False
 
 try:
     import chardet
     HAVE_CHARDET = True
 except ImportError:
     HAVE_CHARDET = False
+
+try:
+    import jsbeautifier
+    HAVE_JSBEAUTIFIER = True
+except ImportError:
+    HAVE_JSBEAUTIFIER = False
+
+log = logging.getLogger(__name__)
 
 def create_folders(root=".", folders=[]):
     """Create directories.
@@ -181,22 +206,14 @@ class Singleton(type):
             cls._instances[cls] = super(Singleton, cls).__call__(*args, **kwargs)
         return cls._instances[cls]
 
-def logtime(dt):
-    """Formats time like a logger does, for the csv output
-       (e.g. "2013-01-25 13:21:44,590")
-    @param dt: datetime object
-    @return: time string
-    """
-    t = time.strftime("%Y-%m-%d %H:%M:%S", dt.timetuple())
-    s = "%s,%03d" % (t, dt.microsecond/1000)
-    return s
+class ThreadSingleton(type):
+    """Singleton per thread."""
+    _instances = threading.local()
 
-def time_from_cuckoomon(s):
-    """Parse time string received from cuckoomon via netlog
-    @param s: time string
-    @return: datetime object
-    """
-    return datetime.strptime(s, "%Y-%m-%d %H:%M:%S,%f")
+    def __call__(cls, *args, **kwargs):
+        if not getattr(cls._instances, "instance", None):
+            cls._instances.instance = super(ThreadSingleton, cls).__call__(*args, **kwargs)
+        return cls._instances.instance
 
 def to_unicode(s):
     """Attempt to fix non uft-8 string into utf-8. It tries to guess input encoding,
@@ -249,18 +266,6 @@ def cleanup_value(v):
         v = v[4:]
     return v
 
-def sanitize_filename(x):
-    """Kind of awful but necessary sanitizing of filenames to
-    get rid of unicode problems."""
-    out = ""
-    for c in x:
-        if c in string.letters + string.digits + " _-.":
-            out += c
-        else:
-            out += "_"
-
-    return out
-
 def classlock(f):
     """Classlock decorator (created for database.Database).
     Used to put a lock to avoid sqlite errors.
@@ -285,6 +290,152 @@ class SuperLock(object):
     def __enter__(self):
         self.tlock.acquire()
         self.mlock.acquire()
+
     def __exit__(self, type, value, traceback):
         self.mlock.release()
         self.tlock.release()
+
+def hash_file(method, filepath):
+    """Calculates an hash on a file by path.
+    @param method: callable hashing method
+    @param path: file path
+    @return: computed hash string
+    """
+    f = open(filepath, "rb")
+    h = method()
+    while True:
+        buf = f.read(1024 * 1024)
+        if not buf:
+            break
+        h.update(buf)
+    return h.hexdigest()
+
+def md5_file(filepath):
+    return hash_file(hashlib.md5, filepath)
+
+def sha1_file(filepath):
+    return hash_file(hashlib.sha1, filepath)
+
+def sha256_file(filepath):
+    return hash_file(hashlib.sha256, filepath)
+
+GUIDS = {}
+
+def guid_name(guid):
+    if not GUIDS:
+        for line in open(os.path.join(CUCKOO_ROOT, "data", "guids.txt")):
+            try:
+                guid, name, url = line.strip().split()
+            except:
+                log.debug("Invalid GUID entry: %s", line)
+                continue
+
+            GUIDS["{%s}" % guid] = name
+
+    return GUIDS.get(guid)
+
+def exception_message():
+    """Creates a message describing an unhandled exception."""
+    def get_os_release():
+        """Returns detailed OS release."""
+        if platform.linux_distribution()[0]:
+            return " ".join(platform.linux_distribution())
+        elif platform.mac_ver()[0]:
+            return "%s %s" % (platform.mac_ver()[0], platform.mac_ver()[2])
+        else:
+            return "Unknown"
+
+    msg = (
+        "Oops! Cuckoo failed in an unhandled exception!\nSometimes bugs are "
+        "already fixed in the development release, it is therefore "
+        "recommended to retry with the latest development release available "
+        "%s\nIf the error persists please open a new issue at %s\n\n" %
+        (GITHUB_URL, ISSUES_PAGE_URL)
+    )
+
+    msg += "=== Exception details ===\n"
+    msg += "Cuckoo version: %s\n" % CUCKOO_VERSION
+    msg += "OS version: %s\n" % os.name
+    msg += "OS release: %s\n" % get_os_release()
+    msg += "Python version: %s\n" % sys.version.split()[0]
+    msg += "Machine arch: %s\n" % platform.machine()
+
+    git_version = os.path.join(CUCKOO_ROOT, ".git", "refs", "heads", "master")
+    if os.path.exists(git_version):
+        try:
+            msg += "Git version: %s\n" % open(git_version, "rb").read().strip()
+        except:
+            pass
+
+    try:
+        import pip
+
+        msg += "Modules: %s\n" % " ".join(sorted(
+            "%s:%s" % (package.key, package.version)
+            for package in pip.get_installed_distributions()
+        ))
+    except ImportError:
+        pass
+
+    msg += "\n"
+    return msg
+
+_jsbeautify_blacklist = [
+    "",
+    "error: Unknown p.a.c.k.e.r. encoding.\n",
+]
+
+_jsbeautify_lock = threading.Lock()
+
+def jsbeautify(javascript):
+    """Beautifies Javascript through jsbeautifier and ignore some messages."""
+    if not HAVE_JSBEAUTIFIER:
+        return javascript
+
+    with _jsbeautify_lock:
+        origout, sys.stdout = sys.stdout, StringIO()
+        javascript = jsbeautifier.beautify(javascript)
+
+        if sys.stdout.getvalue() not in _jsbeautify_blacklist:
+            log.warning("jsbeautifier returned error: %s", sys.stdout.getvalue())
+
+        sys.stdout = origout
+    return javascript
+
+def htmlprettify(html):
+    """Beautifies HTML through BeautifulSoup4."""
+    if not HAVE_BS4:
+        return html
+
+    # The following ignores the following bs4 warning:
+    # UserWarning: "." looks like a filename, not markup.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", lineno=182)
+        return bs4.BeautifulSoup(html, "html.parser").prettify()
+
+def json_default(obj):
+    """JSON serializer for objects not serializable by default json code"""
+    if isinstance(obj, datetime):
+        if obj.utcoffset() is not None:
+            obj = obj - obj.utcoffset()
+        return {"$dt": obj.isoformat()}
+    raise TypeError("Type not serializable")
+
+def json_hook(obj):
+    """JSON object hook, deserializing datetimes ($date)"""
+    if "$dt" in obj:
+        x = obj["$dt"]
+        return datetime.strptime(x, "%Y-%m-%dT%H:%M:%S.%f")
+    return obj
+
+def json_encode(obj, **kwargs):
+    """JSON encoding wrapper that handles datetime objects"""
+    return json.dumps(obj, default=json_default, **kwargs)
+
+def json_decode(x):
+    """JSON decoder that does ugly first-level datetime handling"""
+    return json.loads(x, object_hook=json_hook)
+
+def versiontuple(v):
+    """Return the version as a tuple for easy comparison."""
+    return tuple(int(x) for x in v.split("."))

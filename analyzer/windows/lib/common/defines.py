@@ -1,4 +1,5 @@
-# Copyright (C) 2010-2015 Cuckoo Foundation.
+# Copyright (C) 2010-2013 Claudio Guarnieri.
+# Copyright (C) 2014-2016 Cuckoo Foundation.
 # This file is part of Cuckoo Sandbox - http://www.cuckoosandbox.org
 # See the file 'docs/LICENSE' for copying permission.
 
@@ -8,6 +9,7 @@ NTDLL    = windll.ntdll
 KERNEL32 = windll.kernel32
 ADVAPI32 = windll.advapi32
 USER32   = windll.user32
+SHELL32  = windll.shell32
 
 BYTE      = c_ubyte
 WORD      = c_ushort
@@ -62,11 +64,15 @@ PAGE_GUARD                = 0x00000100
 PAGE_NOCACHE              = 0x00000200
 PAGE_WRITECOMBINE         = 0x00000400
 
+PIPE_ACCESS_INBOUND       = 0x00000001
 PIPE_ACCESS_DUPLEX        = 0x00000003
 PIPE_TYPE_MESSAGE         = 0x00000004
 PIPE_READMODE_MESSAGE     = 0x00000002
 PIPE_WAIT                 = 0x00000000
 PIPE_UNLIMITED_INSTANCES  = 0x000000ff
+PIPE_TYPE_BYTE            = 0x00000000
+PIPE_READMODE_BYTE        = 0x00000000
+FILE_FLAG_WRITE_THROUGH   = 0x80000000
 INVALID_HANDLE_VALUE      = 0xffffffff
 ERROR_BROKEN_PIPE         = 0x0000006d
 ERROR_MORE_DATA           = 0x000000EA
@@ -79,6 +85,8 @@ FILE_ATTRIBUTE_HIDDEN     = 0x00000002
 WM_GETTEXT                = 0x0000000D
 WM_GETTEXTLENGTH          = 0x0000000E
 BM_CLICK                  = 0x000000F5
+
+SHARD_PATHA               = 0x00000002
 
 class STARTUPINFO(Structure):
     _fields_ = [
@@ -163,4 +171,17 @@ class SYSTEM_INFO(Structure):
         ("dwAllocationGranularity", DWORD),
         ("wProcessorLevel", WORD),
         ("wProcessorRevision", WORD),
+    ]
+
+class SYSTEMTIME(Structure):
+    _pack_ = 1
+    _fields_ = [
+        ("wYear", WORD),
+        ("wMonth", WORD),
+        ("wDayOfWeek", WORD),
+        ("wDay", WORD),
+        ("wHour", WORD),
+        ("wMinute", WORD),
+        ("wSecond", WORD),
+        ("wMilliseconds", WORD),
     ]

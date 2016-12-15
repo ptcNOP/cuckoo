@@ -1,4 +1,5 @@
-# Copyright (C) 2010-2015 Cuckoo Foundation.
+# Copyright (C) 2010-2013 Claudio Guarnieri.
+# Copyright (C) 2014-2016 Cuckoo Foundation.
 # This file is part of Cuckoo Sandbox - http://www.cuckoosandbox.org
 # See the file 'docs/LICENSE' for copying permission.
 
@@ -21,7 +22,7 @@ fileConfig(config.config_file_name)
 
 # Get cuckoo root path.
 curdir = os.path.abspath(os.path.dirname(__file__))
-sys.path.append(os.path.join(curdir, "..", ".."))
+sys.path.insert(0, os.path.join(curdir, "..", ".."))
 
 from lib.cuckoo.core.database import Base, Database
 

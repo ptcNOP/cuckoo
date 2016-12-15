@@ -1,4 +1,5 @@
-# Copyright (C) 2010-2015 Cuckoo Foundation.
+# Copyright (C) 2010-2013 Claudio Guarnieri.
+# Copyright (C) 2014-2016 Cuckoo Foundation.
 # This file is part of Cuckoo Sandbox - http://www.cuckoosandbox.org
 # See the file 'docs/LICENSE' for copying permission.
 
@@ -6,7 +7,7 @@ import sys
 
 from django.conf import settings
 
-sys.path.append(settings.CUCKOO_PATH)
+sys.path.insert(0, settings.CUCKOO_PATH)
 
 from lib.cuckoo.common.constants import CUCKOO_VERSION
 
@@ -22,5 +23,4 @@ class CuckooHeaders(object):
         response["Pragma"] = "no-cache"
         response["Cache-Control"] = "no-cache"
         response["Expires"] = "0"
-
         return response
