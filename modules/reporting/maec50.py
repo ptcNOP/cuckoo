@@ -1,7 +1,7 @@
 # Copyright (c) 2016, The MITRE Corporation
 # All rights reserved.
 
-#This fiel is part of Cuckoo Sandbox - http://www.cuckoosandbox.org
+#This file is part of Cuckoo Sandbox - http://www.cuckoosandbox.org
 #See the file "docs/LICENSE" for copying permission.
 
 import os
