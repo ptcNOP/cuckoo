@@ -87,23 +87,23 @@ class MAEC50Report(Report):
 		
 		if "target" in self.results and self.results['target']['category'] == 'file':
 			malwareInstance["id"] = mixbox.idgen.create_id(prefix = self.results['target']['file']['md5'])
+			
+			#create file object for the malware instance object
 			file_obj_id, file_obj = createFileObj(self.results['target']['file'])
+			
 			#put instance object reference in malware instance
 			malwareInstance['instance_object_refs'] = [file_obj_id]
+			
 			#insert actual instance object in package.objects
 			self.package['objects'][file_obj_id]= file_obj
-			
+		
+			#grab static strings	
 			malwareInstance["static_features"]:[
 				{
 					"strings":[x for x in self.results['target']['file']['urls']]
 				}
 			]
-			malwareInstance["analysis_metadata"]:[
-				{
-					"comments":["Analysis conducted by the Cuckoo Sandbox 2.0-RC2"],
-					"tool_refs":["Cuckoo Sandbox" ]
-				}
-			]
+
 			
 			#if target malware has virus total scans, add them to the Malware Instance's corresponding STIX file object
 			if self.results['virustotal']:
@@ -117,6 +117,23 @@ class MAEC50Report(Report):
 			}]
 			'''TODO: add AV Virus Total scans - does it do it for URLs?'''
 		
+		#add cuckoo information
+		tool_id = mixbox.idgen.create_id(prefix = "software-obj(tool)")
+		self.package['objects'][tool_id]={
+			"type": "software"
+			"name": "Cuckoo Sandbox",
+			"version": self.results['info']['version']
+		}
+		malwareInstance['analyses'] = [
+			{
+				"tool_refs":[tool_id],
+				"summary":"Automated analysis conducted by Cuckoo Sandbox"
+			}
+		]
+					
+
+
+		#add malwareInstance to package
 		self.package['malware_instances'].append(malwareInstance)
 
 
