@@ -7,7 +7,7 @@
 import json
 import os
 import re
-
+import time
 
 from lib.cuckoo.common.abstracts import Report
 from lib.cuckoo.common.exceptions import CuckooReportError
@@ -18,8 +18,6 @@ import mixbox.idgen
 '''TODO
 
 -Add function documentation and comments
--Static analysis/check run through
--not tested yet
 
 '''
 ID_GEN_PREFIX = "example:"
@@ -33,7 +31,6 @@ maec50_package = {
     "objects":{},
     "behaviors":[],
     "actions":[],
-    "process_trees":[],
     "collections":[],
     "relationships":[]
 }
@@ -71,10 +68,16 @@ class MAEC50Report(Report):
         '''Writes MAEC5.0 report from Cuckoo results.
         @param results: Cuckoo results dictionary.
         '''
+        self.pidActionMap = {}
         self.results = results
         self.setup()
         self.setupMalwareInstance()
         self.addDroppedFiles()
+        #self.addActions()
+        #self.addBehaviors()
+        self.addProcessTree()
+
+        #self.processCuckooSignatures()
 
 
         self.output()
@@ -103,6 +106,8 @@ class MAEC50Report(Report):
             
             #insert actual instance object in package.objects
             self.package['objects'][file_obj_id]= file_obj
+
+            malwareInstance['behavioral_features'] = {}
         
             #grab static strings    
             malwareInstance["static_features"]=[
@@ -166,7 +171,8 @@ class MAEC50Report(Report):
             )    
 
 
-    '''takes a Cuckoo file dictionary and returns a 
+    '''
+    takes a Cuckoo file dictionary and returns a 
     STIX file object and its reference id
     '''
     def createFileObj(self, cuckoo_file_dict):
@@ -196,8 +202,10 @@ class MAEC50Report(Report):
             #split path on last "\" or "/", then grab substring[0]
             dir_path = re.split(r'\\|/', cuckoo_file_dict['filepath'][::-1], maxsplit=1)[1][::-1]
             dir_obj_id, dir_obj = self.createDirectoryObj(dir_path)
+
         #target file uses the "path" field for recording directory
         elif "path" in cuckoo_file_dict and cuckoo_file_dict['path']:
+            #split path on last "\" or "/", then grab substring[0]
             dir_path = re.split(r'\\|/', cuckoo_file_dict['path'][::-1], maxsplit=1)[1][::-1]
             dir_obj_id, dir_obj = self.createDirectoryObj(dir_path)
 
@@ -248,6 +256,50 @@ class MAEC50Report(Report):
                 avClassList.append(avClassObj)
         return avClassList
 
+
+    '''
+    Translate the Process Tree observed in Cuckoo to MAEC 5.0
+    '''
+    def addProcessTree(self):
+        if not self.options['processtree']:
+            return
+        if not "processtree" in self.results.get('behavior', {}) or len(self.results.get('behavior',{}).get('processtree',{}))<0:
+            return
+
+        malware_object_id= self.package['malware_instances'][0]['instance_object_refs'][0]
+
+        for process in self.results['behavior']['processtree']:
+            #only grab malware instance process from cuckoo (any children are nested under)
+            if process['process_name'] == self.package['objects'][malware_object_id]['name']:
+                proc_tree = self.createProcessTreeType(process)
+                self.package['malware_instances'][0]['behavioral_features']['process_trees']=[proc_tree]
+                break
+
+            
+    '''
+    used as a recursive function for creating process types
+    '''
+    def createProcessTreeType(self, process):
+        '''param @process - process dictionary (from Cuckoo)'''
+        #create STIX process object
+        proc_obj_id = mixbox.idgen.create_id(prefix = 'process-obj').split(ID_GEN_PREFIX)[1]
+        proc_obj = {}
+        proc_obj['type']= 'process'
+        proc_obj['pid'] = process['pid']
+        proc_obj['name'] = process['process_name']
+        proc_obj['command_line'] = process['command_line']
+        proc_obj['created'] = str(process['first_seen']).replace(' ','T')
+
+        #insert process object
+        self.package['objects'][proc_obj_id] = proc_obj
+
+        #create MAEC 5.0 fields
+        process_tree={}
+        process_tree['process_ref'] = proc_obj_id
+        process_tree['initiated_action_refs'] = self.pidActionMap.get(process['pid'],[])
+        process_tree['spawned_processes'] = [self.createProcessTreeType(c) for c in process['children']]
+
+        return process_tree
 
     #map cuckoo file types to a mime type - update "mime_map" accordingly to support more mime types        
     def _get_mime_type(self, cuckoo_type_desc):
