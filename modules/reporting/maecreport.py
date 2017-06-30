@@ -36,6 +36,7 @@ TODO
   --Process Trees (pending refactoring)
   --AV Results
   --Behaviors & Signatures
+--Update/add comments
 '''
 
 maec50_package = {
@@ -65,12 +66,8 @@ mime_map = {
 }
 
 class MaecReport(Report):
-    '''Generates MAEC 5.0 report.
-
-    Arguments
-
-    TODO: determine what arguments are needed given MAEC5.0 json schemas
-
+    '''
+    Generates MAEC 5.0 report.
     '''
 
     def run(self,results):
