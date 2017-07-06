@@ -252,7 +252,7 @@ class MaecReport(Report):
         return (obj_id, file_obj)
 
     '''
-    Create and return a Directory Object from an input path
+    Create and add a Directory to a File
     '''
     def createDirectoryFromFilePath(self, file_obj, path):
         file_name = re.split(r'\\|/', path)[-1]
@@ -368,7 +368,7 @@ class MaecReport(Report):
             return self.objectMap[obj_hash]
 
     '''
-    Deduplicate a Cyber Observable Object by checking to see if it already exists in self.objectMap
+    Map the properties of a Cuckoo-reported Object to its STIX Cyber Observable Representation
     '''
     def mapObjectProperties(self, obj, mapping_entry, arguments):
         obj_dict = {}
