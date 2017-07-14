@@ -2,7 +2,7 @@
 # All rights reserved.
 
 # MAEC 5.0 Cuckoo Report Module
-# BETA - 06/30/2017
+# BETA - 07/14/2017
 
 # This file is part of Cuckoo Sandbox - http://www.cuckoosandbox.org
 # See the file "docs/LICENSE" for copying permission.
@@ -20,10 +20,8 @@
 import json
 import os
 import re
-import time
 import uuid
 
-from datetime import datetime
 from cuckoo.common.abstracts import Report
 from cuckoo.common.exceptions import CuckooReportError
 
@@ -33,19 +31,17 @@ TODO
 --Update and further refine mappings
 --More testing! Especially around network actions/mappings
 --Add Other MAEC features:
-  --Process Trees (pending refactoring)
   --AV Results
   --Behaviors & Signatures
 --Update/add comments
 '''
 
 maec50_package = {
-    "type":"package",
+    "type": "package",
     "id": None,
     "schema_version" : 5.0,
-    "malware_instances":[],
-    "objects":{},
-    "actions":[]
+    "objects": [],
+    "observable_objects": {}
 }
 
 '''
@@ -77,13 +73,14 @@ class MaecReport(Report):
         self.primaryInstance = None
         self.currentObjectIndex = 0
         self.pidActionMap = {}
+        self.pidObjectMap = {}
         self.objectMap = {}
         self.apiMappings = {}
         self.results = results
         self.setup()
-        self.setupPrimaryMalwareInstance()
         self.addDroppedFiles()
         self.mapAPICalls()
+        self.addProcessTree()
         self.output()
 
     '''
@@ -97,6 +94,8 @@ class MaecReport(Report):
         mappings_file = os.path.dirname(os.path.realpath(__file__)) + '/maec_api_call_mappings.json'
         with open(mappings_file) as f:
             self.apiMappings = json.load(f)
+        # Set up the primary Malware Instance
+        self.setupPrimaryMalwareInstance()
 
     '''
     Create and return a Cyber Observable Object ID
@@ -123,10 +122,10 @@ class MaecReport(Report):
         malwareInstance['instance_object_refs'] = [file_obj_id]
 
         # Insert actual instance object in package.objects
-        self.package['objects'][file_obj_id] = file_obj
+        self.package['observable_objects'][file_obj_id] = file_obj
 
         # Add malwareInstance to package
-        self.package['malware_instances'].append(malwareInstance)
+        self.package['objects'].append(malwareInstance)
 
         # Return the Malware Instance
         return malwareInstance
@@ -150,8 +149,8 @@ class MaecReport(Report):
             
             #if target malware has virus total scans, add them to the Malware Instance's corresponding STIX file object
             if 'virustotal' in self.results and self.results['virustotal']:
-                self.package['objects'][file_obj_id]['extensions'] = {}
-                self.package['objects'][file_obj_id]['extensions']['x-maec-avclass'] = self.createAVClassObjList(self.results['virustotal'])
+                self.package['observable_objects'][file_obj_id]['extensions'] = {}
+                self.package['observable_objects'][file_obj_id]['extensions']['x-maec-avclass'] = self.createAVClassObjList(self.results['virustotal'])
                 
         elif "target" in self.results and self.results['target']['category']=='url':
             malwareInstance = {
@@ -164,12 +163,12 @@ class MaecReport(Report):
             }]
             '''TODO: add AV Virus Total scans - does it do it for URLs?'''
             # Add malwareInstance to package
-            self.package['malware_instances'].append(malwareInstance)
+            self.package['objects'].append(malwareInstance)
 
         if malwareInstance:
             # Add cuckoo information
             tool_id = self.createObjID()
-            self.package['objects'][tool_id]={
+            self.package['observable_objects'][tool_id]={
                 "type": "software",
                 "name": "Cuckoo Sandbox",
                 "version": self.results['info']['version']
@@ -196,16 +195,12 @@ class MaecReport(Report):
             # Create a new Malware Instance for each dropped file
             malwareInstance = self.createMalwareInstance(f)
 
-            # Add the relationships to the package (if not already present)
-            if 'relationships' not in self.package:
-                self.package['relationships'] = []
-
             # Add relationship object to connect original malware instance and new malware instance (from dropped file)
-            self.package['relationships'].append(
+            self.package['objects'].append(
                 {
                     "type": "relationship",
                     "id": "relationship--" + str(uuid.uuid4()),
-                    "source_ref": self.package['malware_instances'][0]['id'],
+                    "source_ref": self.primaryInstance['id'],
                     "target_ref": malwareInstance['id'],
                     "relationship_type": "drops"
                 }
@@ -290,6 +285,26 @@ class MaecReport(Report):
         return (dir_obj_id, dir_obj)
 
     '''
+    Create a Process Object from a Cuckoo Process and add it to the Objects dictionary
+    '''
+    def createProcessObj(self, obj):
+        proc_obj = {'type' : 'process'}
+        proc_obj_id = self.createObjID()
+        proc_mappings = {'pid' : 'pid',
+                         'process_name' : 'name',
+                         'command_line' : 'command_line'}
+        # Do the Cuckoo -> Cyber Observable mapping
+        for key, value in proc_mappings.items():
+            if key in obj:
+                proc_obj[value] = obj[key]
+       # Do the timestamp conversion
+        if 'first_seen' in obj:
+            proc_obj['created'] = obj['first_seen'].isoformat()
+        # Add the process to the PID -> Object map
+        self.pidObjectMap[str(obj['pid'])] = self.deduplicateObj(proc_obj, proc_obj_id)
+
+
+    '''
     Add HTTP request data to a Network Traffic Object
     '''
     def addHTTPData(self, obj, http_resource, network_obj):
@@ -361,7 +376,7 @@ class MaecReport(Report):
     def deduplicateObj(self, obj, obj_id):
         obj_hash = json.dumps(obj, sort_keys=True)
         if obj_hash not in self.objectMap:
-            self.package['objects'][obj_id] = obj
+            self.package['observable_objects'][obj_id] = obj
             self.objectMap[obj_hash] = obj_id
             return obj_id
         elif obj_hash in self.objectMap:
@@ -442,7 +457,6 @@ class MaecReport(Report):
                 if type(obj['protocols']) is not list:
                     obj['protocols'] = [str(obj['protocols'])]
                 obj['protocols'] = [protocol_mappings[x] if x in protocol_mappings else x for x in obj['protocols']]
-
         # Check to see if we already have this object stored in our map
         # If so, replace it with a reference to the existing object
         return self.deduplicateObj(obj, obj_id)
@@ -463,7 +477,7 @@ class MaecReport(Report):
         # Map any output objects
         if 'output_objects' in mapping:
             self.mapObjects(action, "output_objects", mapping, call['arguments'])
-        self.package['actions'].append(action)
+        self.package['objects'].append(action)
         return action['id']
 
     '''
@@ -479,18 +493,10 @@ class MaecReport(Report):
                     action_id = self.mapAPIToAction(mapping, call)
                     # Add the Action to the process/action map
                     if str(process['pid']) not in self.pidActionMap:
-                        self.pidActionMap = [action_id]
+                        self.pidActionMap[str(process['pid'])] = [action_id]
                     else:
                         process_actions = self.pidActionMap[str(process['pid'])]
                         process_actions.append(action_id)
-                    # Add the mapped Actions to the dynamic features of the primary Malware Instance
-                    if self.primaryInstance:
-                        dynamic_features = self.primaryInstance["dynamic_features"]
-                        if "action_refs" not in dynamic_features:
-                            dynamic_features["action_refs"] = [action_id]
-                        else:
-                            action_refs = dynamic_features["action_refs"]
-                            action_refs.append(action_id)
 
     '''
     Takes the virusTotal scan dictionary for a file (from Cuckoo report).
@@ -513,6 +519,56 @@ class MaecReport(Report):
                 avClassList.append(avClassObj)
         return avClassList
 
+    '''
+    Create and return a ProcessTreeNode
+    '''
+    def createProcessTreeNode(self, process, process_children, is_root):
+        process_obj = self.package['observable_objects'][self.pidObjectMap[str(process['pid'])]]
+        # Add the parent reference to the Process
+        if not is_root and 'parent_ref' not in process_obj:
+            process_obj['parent_ref'] = self.pidObjectMap[str(process['ppid'])]
+        # Add any child references to the Process
+        if str(process['pid']) in process_children:
+            process_obj['child_refs'] = [self.pidObjectMap[x] for x in process_children[str(process['pid'])]]
+        # Create the Process Tree Node
+        node = {"process_ref": self.pidObjectMap[str(process['pid'])]}
+        if str(process['pid']) in self.pidActionMap:
+            node["initiated_action_refs"] = self.pidActionMap[str(process['pid'])]
+        if is_root:
+            node["ordinal_position"] = 0
+        return node
+
+    '''
+    Build and add the Process Tree to the primary Malware Instance
+    '''
+    def addProcessTree(self):
+        process_tree_nodes = []
+        process_children = {}
+        processes = self.results.get("behavior", {}).get("processes", [])
+        process_pids = [str(process['pid']) for process in processes]
+        # Iterate through all of the processes to build up the parent/child relationships
+        # Also, create the Cyber Observable Process Object if it doesn't already exist
+        for process in processes:
+            if 'ppid' in process and str(process['ppid']) in process_pids:
+                if str(process['ppid']) not in process_children:
+                    process_children[str(process['ppid'])] = [str(process['pid'])]
+                else:
+                    process_children[str(process['ppid'])].append(str(process['pid']))
+            # Add the Process Object if it doesn't exist
+            # TODO: verify if this actually happens
+            if str(process['pid']) not in self.pidObjectMap:
+                self.createProcessObj(process)
+        # Create the nodes for each Process in the tree
+        for process in processes:
+            ppid = process['ppid']
+            # This is the "root" process
+            if str(ppid) not in process_pids:
+                node = self.createProcessTreeNode(process, process_children, True)
+                process_tree_nodes.append(node)
+            else:
+                node = self.createProcessTreeNode(process, process_children, False)
+                process_tree_nodes.append(node)
+        self.primaryInstance['dynamic_features']['process_tree'] = process_tree_nodes
 
     '''
     Map cuckoo file types to a mime type - update "mime_map" accordingly to support more mime types
