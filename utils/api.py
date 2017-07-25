@@ -260,6 +260,7 @@ def tasks_report(task_id, report_format="json"):
     formats = {
         "json": "report.json",
         "html": "report.html",
+        "maec": "report.MAEC-5.0.json",
     }
 
     bz_formats = {
@@ -306,7 +307,7 @@ def tasks_report(task_id, report_format="json"):
         return json_error(400, "Invalid report format")
 
     if os.path.exists(report_path):
-        if report_format == "json":
+        if report_format == "json" or report_format == "maec":
             response = make_response(open(report_path, "rb").read())
             response.headers["Content-Type"] = "application/json"
             return response
