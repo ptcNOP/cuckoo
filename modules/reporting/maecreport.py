@@ -436,12 +436,14 @@ class MaecReport(Report):
     '''
     def postProcessObject(self, obj, obj_id, arguments):
         protocol_mappings = {"1" : "ftp",
-                             "3": "http"}
+                             "3" : "http"}
         if obj['type'] == 'file':
             self.createDirectoryFromFilePath(obj, obj['name'])
         elif obj['type'] == 'windows-registry-key':
             if 'regkey' in arguments and 'regkey_r' in arguments and 'values' in obj:
                 obj['key'] = obj['key'].replace("\\" + arguments['regkey_r'], "").rstrip()
+            elif 'regkey' in arguments and 'keyname' in arguments and 'values' in obj:
+                obj['key'] = obj['key'].replace("\\" + arguments['keyname'], "").rstrip()
         elif obj['type'] == 'process':
             if 'filepath' in arguments:
                 file_obj = {"name": arguments['filepath']}
