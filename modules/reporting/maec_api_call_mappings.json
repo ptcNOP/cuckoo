@@ -581,7 +581,7 @@
       {
         "object_type":"windows-registry-key",
         "object_property":"values/name",
-        "cuckoo_arg":"value"
+        "cuckoo_arg":"key_name"
       }
     ],
     "output_objects":[
@@ -593,12 +593,17 @@
       {
         "object_type":"windows-registry-key",
         "object_property":"values/name",
-        "cuckoo_arg":"value"
+        "cuckoo_arg":"key_name"
       },
       {
         "object_type":"windows-registry-key",
         "object_property":"values/data",
-        "cuckoo_arg":"data"
+        "cuckoo_arg":"value"
+      },
+      {
+        "object_type":"windows-registry-key",
+        "object_property":"values/data_type",
+        "cuckoo_arg":"reg_type"
       }
     ]
   },
