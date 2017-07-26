@@ -437,6 +437,21 @@ class MaecReport(Report):
     def postProcessObject(self, obj, obj_id, arguments):
         protocol_mappings = {"1" : "ftp",
                              "3" : "http"}
+        registry_type_mappings = {
+            0: "REG_NONE",
+            1: "REG_SZ",
+            2: "REG_EXPAND_SZ",
+            3: "REG_BINARY",
+            4: "REG_DWORD",
+            5: "REG_DWORD_BIG_ENDIAN",
+            6: "REG_LINK",
+            7: "REG_MULTI_SZ",
+            8: "REG_RESOURCE_LIST",
+            9: "REG_FULL_RESOUCE_DESCRIPTOR",
+            10: "REG_RESOURCE_REQUIREMENTS_LIST",
+            11: "REG_QWORD",
+        }
+
         if obj['type'] == 'file':
             self.createDirectoryFromFilePath(obj, obj['name'])
         elif obj['type'] == 'windows-registry-key':
@@ -444,6 +459,10 @@ class MaecReport(Report):
                 obj['key'] = obj['key'].replace("\\" + arguments['regkey_r'], "").rstrip()
             elif 'regkey' in arguments and 'key_name' in arguments and 'values' in obj:
                 obj['key'] = obj['key'].replace("\\" + arguments['key_name'], "").rstrip()
+            if 'reg_type' in arguments and 'values' in obj and 'data_type' in obj['values'][0]:
+                obj['values'][0]['data_type'] = registry_type_mappings.get(
+                    obj['values'][0]['data_type'],
+                    'UNKNOWN')
         elif obj['type'] == 'process':
             if 'filepath' in arguments:
                 file_obj = {"name": arguments['filepath']}
