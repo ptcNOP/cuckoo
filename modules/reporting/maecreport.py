@@ -447,7 +447,7 @@ class MaecReport(Report):
             6: "REG_LINK",
             7: "REG_MULTI_SZ",
             8: "REG_RESOURCE_LIST",
-            9: "REG_FULL_RESOURCE_DESCRIPTOR",
+            9: "REG_FULL_RESOURCE_DESCRIPTION",
             10: "REG_RESOURCE_REQUIREMENTS_LIST",
             11: "REG_QWORD",
         }
@@ -462,7 +462,7 @@ class MaecReport(Report):
             if 'reg_type' in arguments and 'values' in obj and 'data_type' in obj['values'][0]:
                 obj['values'][0]['data_type'] = registry_type_mappings.get(
                     obj['values'][0]['data_type'],
-                    'UNKNOWN')
+                    'REG_INVALID_TYPE')
         elif obj['type'] == 'process':
             if 'filepath' in arguments:
                 file_obj = {"name": arguments['filepath']}
