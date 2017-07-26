@@ -447,7 +447,7 @@ class MaecReport(Report):
             6: "REG_LINK",
             7: "REG_MULTI_SZ",
             8: "REG_RESOURCE_LIST",
-            9: "REG_FULL_RESOUCE_DESCRIPTOR",
+            9: "REG_FULL_RESOURCE_DESCRIPTOR",
             10: "REG_RESOURCE_REQUIREMENTS_LIST",
             11: "REG_QWORD",
         }
