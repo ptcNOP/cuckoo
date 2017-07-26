@@ -442,8 +442,8 @@ class MaecReport(Report):
         elif obj['type'] == 'windows-registry-key':
             if 'regkey' in arguments and 'regkey_r' in arguments and 'values' in obj:
                 obj['key'] = obj['key'].replace("\\" + arguments['regkey_r'], "").rstrip()
-            elif 'regkey' in arguments and 'keyname' in arguments and 'values' in obj:
-                obj['key'] = obj['key'].replace("\\" + arguments['keyname'], "").rstrip()
+            elif 'regkey' in arguments and 'key_name' in arguments and 'values' in obj:
+                obj['key'] = obj['key'].replace("\\" + arguments['key_name'], "").rstrip()
         elif obj['type'] == 'process':
             if 'filepath' in arguments:
                 file_obj = {"name": arguments['filepath']}
